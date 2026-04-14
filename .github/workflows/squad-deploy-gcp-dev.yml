@@ -1,0 +1,115 @@
+name: squad-deploy-gcp-dev
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_REGION: us-central1
+  SERVICE_NAME: squad-service
+  GCP_ENV: dev
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      
+      - name: Build JAVA Application
+        run: mvn clean package -DskipTests
+      
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+      
+      - name: Build Docker Image
+        run: |
+          docker build -t gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA \
+            -t gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:latest .
+      
+      - name: Push Docker Image to Registry
+        run: |
+          gcloud auth configure-docker gcr.io
+          docker push gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA
+          docker push gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:latest
+      
+      - name: Deploy to Cloud Run (dev)
+        run: |
+          gcloud run deploy $SERVICE_NAME \
+            --image gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA \
+            --region $GCP_REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --min-instances 1 \
+            --max-instances 5 \
+            --memory 512Mi \
+            --cpu 1 \
+            --set-env-vars="ENVIRONMENT=dev,GCP_PROJECT=$GCP_PROJECT_ID" \
+            --project $GCP_PROJECT_ID
+      
+      - name: Get Cloud Run URL
+        id: cloud-run
+        run: |
+          SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
+            --region $GCP_REGION \
+            --format 'value(status.url)' \
+            --project $GCP_PROJECT_ID)
+          echo "service_url=$SERVICE_URL" >> $GITHUB_OUTPUT
+      
+      - name: Health Check
+        run: |
+          max_attempts=10
+          attempt=1
+          while [ $attempt -le $max_attempts ]; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" ${{ steps.cloud-run.outputs.service_url }}/health)
+            if [ "$response" = "200" ]; then
+              echo "✅ Health check passed"
+              exit 0
+            fi
+            echo "⏳ Attempt $attempt/$max_attempts: Health check returned $response"
+            sleep 5
+            attempt=$((attempt+1))
+          done
+          echo "❌ Health check failed after $max_attempts attempts"
+          exit 1
+      
+      - name: Notify Slack (Success)
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "✅ Deployed squad-service (dev) | Commit: ${{ github.sha }} | URL: ${{ steps.cloud-run.outputs.service_url }}"
+            }
+      
+      - name: Notify Slack (Failure)
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "❌ Deployment failed: squad-service (dev) | Commit: ${{ github.sha }}"
+            }

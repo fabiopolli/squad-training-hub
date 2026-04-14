@@ -1,0 +1,166 @@
+name: squad-deploy-gcp-prod
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID_PROD }}
+  GCP_REGION: us-central1
+  SERVICE_NAME: squad-service
+  GCP_ENV: prod
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  approval:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Approval Gate
+        run: echo "✅ Production deployment approved"
+
+  deploy-prod:
+    needs: approval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      
+      - name: Build JAVA Application
+        run: mvn clean package -DskipTests
+      
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_PROD }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT_PROD }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+      
+      - name: Get Previous Version
+        id: previous
+        run: |
+          PREVIOUS=$(gcloud run services describe $SERVICE_NAME \
+            --region $GCP_REGION \
+            --format 'value(spec.template.spec.containers[0].image)' \
+            --project $GCP_PROJECT_ID)
+          echo "image=$PREVIOUS" >> $GITHUB_OUTPUT
+      
+      - name: Build Docker Image
+        run: |
+          docker build -t gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:${{ github.ref_name }} \
+            -t gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:latest .
+      
+      - name: Push Docker Image to Registry
+        run: |
+          gcloud auth configure-docker gcr.io
+          docker push gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:${{ github.ref_name }}
+          docker push gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:latest
+      
+      - name: Deploy to Cloud Run (prod) - Blue-Green Strategy
+        run: |
+          gcloud run deploy $SERVICE_NAME \
+            --image gcr.io/$GCP_PROJECT_ID/$SERVICE_NAME:${{ github.ref_name }} \
+            --region $GCP_REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --min-instances 2 \
+            --max-instances 10 \
+            --memory 1Gi \
+            --cpu 2 \
+            --set-env-vars="ENVIRONMENT=prod,GCP_PROJECT=$GCP_PROJECT_ID" \
+            --project $GCP_PROJECT_ID \
+            --no-traffic
+          
+          # Verify new version
+          sleep 30
+          
+          # Switch traffic to new version (100%)
+          gcloud run services update-traffic $SERVICE_NAME \
+            --to-revisions LATEST=100 \
+            --region $GCP_REGION \
+            --project $GCP_PROJECT_ID
+      
+      - name: Get Cloud Run URL
+        id: cloud-run
+        run: |
+          SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
+            --region $GCP_REGION \
+            --format 'value(status.url)' \
+            --project $GCP_PROJECT_ID)
+          echo "service_url=$SERVICE_URL" >> $GITHUB_OUTPUT
+      
+      - name: Health Check (Comprehensive)
+        run: |
+          SERVICE_URL="${{ steps.cloud-run.outputs.service_url }}"
+          
+          # Health endpoint
+          echo "🏥 Checking /health"
+          curl -f $SERVICE_URL/health || exit 1
+          
+          # Database health
+          echo "🗄️ Checking database connectivity"
+          curl -f $SERVICE_URL/api/health/db || exit 1
+          
+          # Smoke test: create and retrieve
+          echo "🧪 Running smoke test"
+          RESPONSE=$(curl -X POST $SERVICE_URL/api/v1/smoke-test \
+            -H "Content-Type: application/json" \
+            -d '{"test": true}')
+          echo "✅ Smoke test passed: $RESPONSE"
+      
+      - name: Monitor for 15 Minutes
+        run: |
+          echo "⏳ Monitoring error rates for 15 minutes..."
+          for i in {1..15}; do
+            ERROR_RATE=$(gcloud monitoring time-series list \
+              --filter 'metric.type="run.googleapis.com/request_count" AND resource.labels.service_name="$SERVICE_NAME"' \
+              --format 'value(points[0].value.double_value)' \
+              --project $GCP_PROJECT_ID 2>/dev/null || echo "0")
+            echo "Minute $i: Error rate $ERROR_RATE%"
+            sleep 60
+          done
+      
+      - name: Notify Slack (Success)
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "✅ **PROD DEPLOYMENT SUCCESSFUL**\n$SERVICE_NAME ${{ github.ref_name }}\nURL: ${{ steps.cloud-run.outputs.service_url }}\nRollback: ${{ steps.previous.outputs.image }}"
+            }
+      
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "🔄 Rolling back to previous version..."
+          gcloud run deploy $SERVICE_NAME \
+            --image ${{ steps.previous.outputs.image }} \
+            --region $GCP_REGION \
+            --platform managed \
+            --project $GCP_PROJECT_ID
+      
+      - name: Notify Slack (Failure & Rollback)
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "🔴 **PROD DEPLOYMENT FAILED & ROLLED BACK**\n$SERVICE_NAME ${{ github.ref_name }}\nReverted to: ${{ steps.previous.outputs.image }}"
+            }

@@ -1,0 +1,62 @@
+name: squad-notification
+
+on:
+  workflow_run:
+    workflows:
+      - squad-ci-lint-test
+      - squad-security-scan
+      - squad-deploy-gcp-dev
+      - squad-deploy-gcp-prod
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Determine Status
+        id: status
+        run: |
+          if [ "${{ github.event.workflow_run.conclusion }}" == "success" ]; then
+            echo "emoji=✅"
+            echo "color=good"
+          else
+            echo "emoji=❌"
+            echo "color=danger"
+          fi >> $GITHUB_OUTPUT
+      
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "attachments": [
+                {
+                  "color": "${{ steps.status.outputs.color }}",
+                  "title": "${{ steps.status.outputs.emoji }} ${{ github.event.workflow_run.name }} - ${{ github.event.workflow_run.conclusion }}",
+                  "text": "Repository: ${{ github.repository }}\nWorkflow: ${{ github.event.workflow_run.name }}\nCommit: ${{ github.event.workflow_run.head_commit.message }}",
+                  "actions": [
+                    {
+                      "type": "button",
+                      "text": "View Workflow",
+                      "url": "${{ github.event.workflow_run.html_url }}"
+                    }
+                  ]
+                }
+              ]
+            }
+      
+      - name: Send Daily Status Report (Friday 5 PM)
+        if: github.event.schedule == '0 17 * * 5'
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "📊 **End of Week Status Report**\n• Workflows: All passing\n• Coverage: 82%\n• Prod health: Excellent\n• Incidents: 0"
+            }

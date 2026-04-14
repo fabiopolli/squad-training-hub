@@ -1,0 +1,26 @@
+{
+  "name": "squad-mock-servers",
+  "version": "1.0.0",
+  "description": "Mock Jira and Confluence servers for Squad Framework demonstrations",
+  "main": "jira-mock.js",
+  "scripts": {
+    "jira": "node jira-mock.js",
+    "confluence": "node confluence-mock.js",
+    "start": "node jira-mock.js & node confluence-mock.js",
+    "start:bash": "./start-mocks.sh",
+    "start:powershell": ".\\start-mocks.ps1"
+  },
+  "keywords": [
+    "mock",
+    "jira",
+    "confluence",
+    "api",
+    "squad",
+    "framework"
+  ],
+  "author": "Squad Framework Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

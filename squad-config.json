@@ -1,0 +1,261 @@
+{
+  "squad": {
+    "name": "Holiday Peak Hub JAVA Squad",
+    "description": "Development squad for JAVA services on GCP with Copilot Agents",
+    "active": true,
+    "version": "1.0",
+
+    "agents": {
+      "tech-manager": {
+        "enabled": true,
+        "file": ".github/agents/squad-tech-manager.agent.md",
+        "role": "Orchestrator, sprint planning, escalations",
+        "tools": ["read", "edit", "search", "web", "agent", "todo"],
+        "auto_invoke": false
+      },
+      "tech-lead": {
+        "enabled": true,
+        "file": ".github/agents/squad-tech-lead.agent.md",
+        "role": "Planning, design review, task decomposition",
+        "tools": ["read", "edit", "search", "web", "agent", "todo"],
+        "auto_invoke": false
+      },
+      "architect": {
+        "enabled": true,
+        "file": ".github/agents/squad-architect.agent.md",
+        "role": "System design, ADRs, pattern validation",
+        "tools": ["read", "edit", "search", "web", "agent"],
+        "auto_invoke": false
+      },
+      "java-developer": {
+        "enabled": true,
+        "file": ".github/agents/squad-java-developer.agent.md",
+        "role": "Backend implementation, testing, GCP deployment",
+        "tools": ["execute", "read", "edit", "search", "web", "agent"],
+        "auto_invoke": false
+      },
+      "qa-engineer": {
+        "enabled": true,
+        "file": ".github/agents/squad-qa-engineer.agent.md",
+        "role": "Testing strategy, coverage, QA validation",
+        "tools": ["execute", "read", "edit", "search", "web", "agent"],
+        "auto_invoke": false
+      }
+    },
+
+    "prompts": [
+      {
+        "name": "Feature Kickoff",
+        "trigger": "/squad-feature-kickoff",
+        "file": ".github/prompts/squad-feature-kickoff.prompt.md",
+        "mode": "squad-tech-lead",
+        "agents_involved": ["tech-lead", "architect"]
+      },
+      {
+        "name": "Design Review",
+        "trigger": "/squad-design-review",
+        "file": ".github/prompts/squad-design-review.prompt.md",
+        "mode": "squad-tech-lead",
+        "agents_involved": ["tech-lead", "architect"]
+      },
+      {
+        "name": "Dev Task Handoff",
+        "trigger": "/squad-dev-task-handoff",
+        "file": ".github/prompts/squad-dev-task-handoff.prompt.md",
+        "mode": "squad-tech-lead",
+        "agents_involved": ["tech-lead", "java-developer"]
+      },
+      {
+        "name": "QA Validation",
+        "trigger": "/squad-qa-validation",
+        "file": ".github/prompts/squad-qa-validation.prompt.md",
+        "mode": "squad-qa-engineer",
+        "agents_involved": ["qa-engineer"]
+      },
+      {
+        "name": "Deployment Checklist",
+        "trigger": "/squad-deployment-checklist",
+        "file": ".github/prompts/squad-deployment-checklist.prompt.md",
+        "mode": "squad-tech-manager",
+        "agents_involved": ["tech-manager"]
+      },
+      {
+        "name": "Retrospective",
+        "trigger": "/squad-retrospective",
+        "file": ".github/prompts/squad-retrospective.prompt.md",
+        "mode": "squad-tech-manager",
+        "agents_involved": ["tech-manager"]
+      }
+    ],
+
+    "instructions": [
+      {
+        "name": "JAVA Coding Standards",
+        "file": ".github/instructions/squad-coding-standards.instructions.md",
+        "applies_to": "**/*.java,**/pom.xml"
+      },
+      {
+        "name": "GCP Deployment Guidelines",
+        "file": ".github/instructions/squad-gcp-guidelines.instructions.md",
+        "applies_to": "**/*.tf,**/gcp-*.yml,**/Dockerfile"
+      },
+      {
+        "name": "Testing Requirements",
+        "file": ".github/instructions/squad-testing-requirements.instructions.md",
+        "applies_to": "**/*Test.java,**/src/test/**"
+      },
+      {
+        "name": "Architecture Patterns",
+        "file": ".github/instructions/squad-architecture-patterns.instructions.md",
+        "applies_to": "**/*.java"
+      },
+      {
+        "name": "Deployment Policy",
+        "file": ".github/instructions/squad-deployment-policy.instructions.md",
+        "applies_to": "**/*.yml,README.md"
+      }
+    ],
+
+    "workflows": [
+      {
+        "name": "CI/CD Lint & Test",
+        "file": ".github/workflows/squad-ci-lint-test.yml",
+        "trigger": "on: [pull_request, push to main]",
+        "purpose": "Run lint, tests, coverage check"
+      },
+      {
+        "name": "Security Scan",
+        "file": ".github/workflows/squad-security-scan.yml",
+        "trigger": "on: [pull_request, push to main]",
+        "purpose": "CodeQL + dependency check + SAST"
+      },
+      {
+        "name": "Deploy to GCP Dev",
+        "file": ".github/workflows/squad-deploy-gcp-dev.yml",
+        "trigger": "on: [push to main]",
+        "purpose": "Automatic deployment to Cloud Run dev"
+      },
+      {
+        "name": "Deploy to GCP Prod",
+        "file": ".github/workflows/squad-deploy-gcp-prod.yml",
+        "trigger": "on: [tag v*.*.* ]",
+        "purpose": "Manual deployment to Cloud Run prod (approval gate)"
+      },
+      {
+        "name": "Notifications",
+        "file": ".github/workflows/squad-notification.yml",
+        "trigger": "on: [workflow_run]",
+        "purpose": "Slack notifications for workflow results"
+      }
+    ],
+
+    "mcp_servers": [
+      {
+        "name": "github",
+        "enabled": true,
+        "auto_loaded": true,
+        "capabilities": ["readFile", "createIssue", "updateIssue", "createComment", "listPRs", "mergePR"],
+        "used_by": ["tech-manager", "tech-lead"]
+      },
+      {
+        "name": "jira",
+        "enabled": false,
+        "instructions": "docs/MCP_INTEGRATION.md",
+        "capabilities": ["createIssue", "updateIssue", "transitionWorkflow", "querySprint", "addComment", "linkIssue"],
+        "used_by": ["tech-manager", "tech-lead"],
+        "env_vars": ["JIRA_API_TOKEN", "JIRA_DOMAIN", "JIRA_PROJECT_KEY"]
+      },
+      {
+        "name": "confluence",
+        "enabled": false,
+        "instructions": "docs/MCP_INTEGRATION.md",
+        "capabilities": ["searchPages", "createPage", "updatePage", "linkPages"],
+        "used_by": ["architect", "tech-lead"],
+        "env_vars": ["CONFLUENCE_API_TOKEN", "CONFLUENCE_HOST", "CONFLUENCE_SPACE_KEY"]
+      }
+    ],
+
+    "delivery_pipeline": [
+      {
+        "stage": "1. Planning",
+        "day": "Monday",
+        "actors": ["tech-manager", "tech-lead", "architect"],
+        "prompt": "/squad-feature-kickoff",
+        "exit_criteria": "Jira epic + task table + architecture ADR",
+        "duration": "2-4 hours"
+      },
+      {
+        "stage": "2. Design Review",
+        "day": "Monday PM",
+        "actors": ["tech-lead", "architect"],
+        "prompt": "/squad-design-review",
+        "exit_criteria": "Design approved OR revisions requested",
+        "duration": "1-2 hours"
+      },
+      {
+        "stage": "3. Implementation",
+        "day": "Tuesday–Thursday",
+        "actors": ["java-developer", "qa-engineer"],
+        "prompt": "/squad-dev-task-handoff",
+        "exit_criteria": "PR with tests (75%+ coverage), QA approved",
+        "duration": "1-3 days per task"
+      },
+      {
+        "stage": "4. Deployment",
+        "day": "Friday",
+        "actors": ["tech-manager"],
+        "prompt": "/squad-deployment-checklist",
+        "exit_criteria": "Service live in prod, metrics green",
+        "duration": "30 min - 2 hours"
+      },
+      {
+        "stage": "5. Retrospective",
+        "day": "Friday PM",
+        "actors": ["tech-manager", "all team"],
+        "prompt": "/squad-retrospective",
+        "exit_criteria": "Action items for next sprint + lessons learned",
+        "duration": "90 minutes"
+      }
+    ],
+
+    "quality_gates": {
+      "test_coverage": {
+        "overall_minimum": 0.75,
+        "critical_minimum": 0.90,
+        "tool": "jacoco",
+        "enforced": true
+      },
+      "code_review": {
+        "required_approvals": 1,
+        "dismiss_stale": true,
+        "require_status_checks": true
+      },
+      "security": {
+        "codeql": "required",
+        "dependency_check": "required",
+        "sast": "spotbugs"
+      },
+      "deployment": {
+        "dev": "automatic on main",
+        "staging": "manual tag with approval",
+        "prod": "manual tag with approval (tech-manager + tech-lead)"
+      }
+    },
+
+    "environment_variables": {
+      "GCP_PROJECT_ID": "your-gcp-project",
+      "GCP_REGION": "us-central1",
+      "SLACK_WEBHOOK": "https://hooks.slack.com/services/...",
+      "JIRA_DOMAIN": "fiap.atlassian.net",
+      "CONFLUENCE_DOMAIN": "fiap.atlassian.net"
+    },
+
+    "documentation": {
+      "setup": "novos/docs/SETUP.md",
+      "troubleshooting": "novos/docs/TROUBLESHOOTING.md",
+      "mcp_integration": "novos/docs/MCP_INTEGRATION.md",
+      "training_agenda": "novos/docs/TRAINING_AGENDA.md",
+      "main_framework": "novos/SQUAD_FRAMEWORK.md"
+    }
+  }
+}
